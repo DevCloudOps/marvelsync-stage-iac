@@ -197,8 +197,8 @@ resource "aws_security_group" "ecs_lb" {
   vpc_id      = var.vpc_id
 
   ingress {
-    from_port   = 8080
-    to_port     = 8080
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
     description = "Allow Backend API traffic"
@@ -386,17 +386,17 @@ resource "aws_lb_target_group" "backend" {
   port        = 8080
   protocol    = "HTTP"
   vpc_id      = var.vpc_id
-  target_type = "ip"
+  target_type = "instance"
 
   health_check {
     enabled             = true
     healthy_threshold   = 2
-    interval            = 30
+    interval            = 60
     matcher             = "200"
     path                = "/api/v1/actuator/health"
     port                = "traffic-port"
     protocol            = "HTTP"
-    timeout             = 5
+    timeout             = 15
     unhealthy_threshold = 3
   }
 
@@ -408,8 +408,11 @@ resource "aws_lb_target_group" "backend" {
 # ALB Listener for Backend (Port 8080)
 resource "aws_lb_listener" "backend" {
   load_balancer_arn = aws_lb.ecs.arn
-  port              = "8080"
-  protocol          = "HTTP"
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"  
+
+  certificate_arn = "arn:aws:acm:us-east-1:959959864795:certificate/329cf41f-e512-483c-8154-54b16a966537"
 
   default_action {
     type             = "forward"
@@ -424,7 +427,7 @@ resource "aws_lb_listener" "backend" {
 # Backend Task Definition - Updated for EC2
 resource "aws_ecs_task_definition" "backend" {
   family                   = "${var.project_name}-${var.environment}-backend"
-  network_mode             = "awsvpc"
+  network_mode             = "bridge"
   # Removed requires_compatibilities = ["FARGATE"]
   cpu                      = var.backend_task_cpu
   memory                   = var.backend_task_memory
@@ -435,10 +438,12 @@ resource "aws_ecs_task_definition" "backend" {
     {
       name  = "backend"
       image = var.backend_image
+      essential = true
 
       portMappings = [
         {
           containerPort = 8080
+          hostPort     = 0
           protocol      = "tcp"
         }
       ]
@@ -454,19 +459,23 @@ resource "aws_ecs_task_definition" "backend" {
           awslogs-stream-prefix = "backend"
         }
       }
-
+    
       healthCheck = {
         command     = ["CMD-SHELL", "curl -f http://localhost:8080/api/v1/actuator/health || exit 1"]
-        interval    = 30
-        timeout     = 5
+        interval    = 60
+        timeout     = 10
         retries     = 3
-        startPeriod = 60
+        startPeriod = 90
       }
 
       essential = true
     }
   ])
-
+  # lifecycle {
+  #   ignore_changes = [
+  #     container_definitions,  # Ignore changes to container definitions
+  #   ]
+  # }
   tags = merge(var.tags, {
     Name = "${var.project_name}-${var.environment}-backend-task"
   })
@@ -480,12 +489,6 @@ resource "aws_ecs_service" "backend" {
   desired_count   = var.backend_service_desired_count
   launch_type     = "EC2"  # Changed from FARGATE
 
-  network_configuration {
-    security_groups  = [var.private_security_group_id]
-    subnets          = var.private_subnet_ids
-    assign_public_ip = false
-  }
-
   load_balancer {
     target_group_arn = aws_lb_target_group.backend.arn
     container_name   = "backend"
@@ -497,6 +500,13 @@ resource "aws_ecs_service" "backend" {
   tags = merge(var.tags, {
     Name = "${var.project_name}-${var.environment}-backend-service"
   })
+
+  lifecycle {
+    ignore_changes = [
+      task_definition,  # Ignore changes to task definition
+      desired_count     # Optionally ignore changes to desired count if you manage scaling elsewhere
+    ]
+  }
 }
 
 # Data sources

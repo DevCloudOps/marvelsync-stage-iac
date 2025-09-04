@@ -37,67 +37,67 @@ module "s3" {
 }
 
 # ECR Repository
-# resource "aws_ecr_repository" "app" {
-#   name                 = "${var.project_name}-acr"
-#   image_tag_mutability = "MUTABLE"
+resource "aws_ecr_repository" "app" {
+  name                 = "${var.project_name}-${var.environment}-acr"
+  image_tag_mutability = "MUTABLE"
 
-#   image_scanning_configuration {
-#     scan_on_push = true
-#   }
+  image_scanning_configuration {
+    scan_on_push = true
+  }
 
-#   encryption_configuration {
-#     encryption_type = "AES256"
-#   }
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
 
-#   tags = merge(var.tags, {
-#     Name = "${var.project_name}-acr"
-#   })
-# }
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-acr"
+  })
+}
 
 # ECR Lifecycle Policy
-# resource "aws_ecr_lifecycle_policy" "app" {
-#   repository = aws_ecr_repository.app.name
+resource "aws_ecr_lifecycle_policy" "app" {
+  repository = aws_ecr_repository.app.name
 
-#   policy = jsonencode({
-#     rules = [
-#       {
-#         rulePriority = 1
-#         description  = "Keep last 30 images"
-#         selection = {
-#           tagStatus     = "any"
-#           countType     = "imageCountMoreThan"
-#           countNumber   = 30
-#         }
-#         action = {
-#           type = "expire"
-#         }
-#       }
-#     ]
-#   })
-# }
+  policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Keep last 30 images"
+        selection = {
+          tagStatus     = "any"
+          countType     = "imageCountMoreThan"
+          countNumber   = 30
+        }
+        action = {
+          type = "expire"
+        }
+      }
+    ]
+  })
+}
 
-# # ECR Repository Policy
-# resource "aws_ecr_repository_policy" "app" {
-#   repository = aws_ecr_repository.app.name
+# ECR Repository Policy
+resource "aws_ecr_repository_policy" "app" {
+  repository = aws_ecr_repository.app.name
 
-#   policy = jsonencode({
-#     Version = "2012-10-17"
-#     Statement = [
-#       {
-#         Sid    = "AllowPullFromECSTasks"
-#         Effect = "Allow"
-#         Principal = {
-#           Service = "ecs-tasks.amazonaws.com"
-#         }
-#         Action = [
-#           "ecr:GetDownloadUrlForLayer",
-#           "ecr:BatchGetImage",
-#           "ecr:BatchCheckLayerAvailability"
-#         ]
-#       }
-#     ]
-#   })
-# }
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowPullFromECSTasks"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+        Action = [
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:BatchCheckLayerAvailability"
+        ]
+      }
+    ]
+  })
+}
 
 # RDS Aurora Module
 module "rds" {
@@ -108,19 +108,20 @@ module "rds" {
   private_subnet_ids       = module.vpc.private_subnet_ids
   private_security_group_id = module.vpc.private_security_group_id
   ecs_security_group_id    = module.ecs.ecs_security_group_id
+  ec2_nat_security_group_id = module.vpc.nat_instance_security_group_id
   db_instance_class        = var.db_instance_class
   db_username              = var.db_username
   db_password              = local.db_password
   db_name                  = var.db_name
   create_replica           = false
   tags                     = var.tags
-  snapshot_identifier      = "arn:aws:rds:ap-south-1:959959864795:snapshot:jarwiz-stage-iac-setup"
+  snapshot_identifier      = "arn:aws:rds:us-east-1:959959864795:snapshot:production-ready-snapshot"
   skip_final_snapshot      = true
-
   depends_on = [module.vpc]
+  glue_security_group_id   = var.glue_security_group_id
 }
 
-# ECS Module - Updated for EC2-backed ECS with t3a.medium
+# # ECS Module - Updated for EC2-backed ECS with t3a.medium
 module "ecs" {
   source = "./modules/ecs"
 
@@ -132,7 +133,7 @@ module "ecs" {
   public_security_group_id = module.vpc.public_security_group_id
   private_security_group_id = module.vpc.private_security_group_id
   s3_data_bucket_arn       = module.s3.app_data_bucket_arn
-  backend_image            = "959959864795.dkr.ecr.ap-south-1.amazonaws.com/jarwiz-acr:stage-backend-latest"
+  backend_image            = "${aws_ecr_repository.app.repository_url}:backend-latest"
   key_name                 = var.key_name
   # Task definitions resources - these should fit within a t3a.medium instance
   backend_task_cpu         = 1024  # 1 vCPU
@@ -144,7 +145,7 @@ module "ecs" {
   backend_environment      = [
     {
       name  = "SPRING_PROFILES_ACTIVE"
-      value = "docker"
+      value = "medexpert"
     },
     {
       name  = "JAVA_OPTS"
@@ -161,22 +162,22 @@ module "ecs" {
   ]
   backend_secrets          = [
     # All environment variables from the single secret
-    # {
-    #   name      = "DB_PASSWORD"
-    #   valueFrom = "arn:aws:secretsmanager:ap-south-1:959959864795:secret:stage/jarwiz/qms/env-iDOjMq:DB_PASSWORD::"
-    # },
-    # {
-    #   name      = "AWS_ACCESS_KEY_ID"
-    #   valueFrom = "arn:aws:secretsmanager:ap-south-1:959959864795:secret:stage/jarwiz/qms/env-iDOjMq:AWS_ACCESS_KEY_ID::"
-    # },
-    # {
-    #   name      = "AWS_SECRET_ACCESS_KEY"
-    #   valueFrom = "arn:aws:secretsmanager:ap-south-1:959959864795:secret:stage/jarwiz/qms/env-iDOjMq:AWS_SECRET_ACCESS_KEY::"
-    # },
-    # {
-    #   name      = "FIREBASE_API_KEY"
-    #   valueFrom = "arn:aws:secretsmanager:ap-south-1:959959864795:secret:stage/jarwiz/qms/env-iDOjMq:FIREBASE_API_KEY::"
-    # }
+    {
+      name      = "DB_PASSWORD"
+      valueFrom = "arn:aws:secretsmanager:ap-south-1:959959864795:secret:jarwiz/medexpert/ecs/qms-5IUpwF:DB_PASSWORD::"
+    },
+    {
+      name      = "AWS_ACCESS_KEY_ID"
+      valueFrom = "arn:aws:secretsmanager:ap-south-1:959959864795:secret:jarwiz/medexpert/ecs/qms-5IUpwF:AWS_ACCESS_KEY_ID::"
+    },
+    {
+      name      = "AWS_SECRET_ACCESS_KEY"
+      valueFrom = "arn:aws:secretsmanager:ap-south-1:959959864795:secret:jarwiz/medexpert/ecs/qms-5IUpwF:AWS_SECRET_ACCESS_KEY::"
+    },
+    {
+      name      = "FIREBASE_API_KEY"
+      valueFrom = "arn:aws:secretsmanager:ap-south-1:959959864795:secret:jarwiz/medexpert/ecs/qms-5IUpwF:FIREBASE_API_KEY::"
+    }
   ]
   tags                     = var.tags
 

@@ -1,7 +1,7 @@
 variable "aws_region" {
   description = "AWS region"
   type        = string
-  default     = "ap-south-1"
+  default     = "us-east-1"
 }
 
 variable "project_name" {
@@ -13,7 +13,7 @@ variable "project_name" {
 variable "environment" {
   description = "Environment name"
   type        = string
-  default     = "stage"
+  default     = "medexpert"
 }
 
 variable "vpc_cidr" {
@@ -25,31 +25,31 @@ variable "vpc_cidr" {
 variable "public_subnet_cidrs" {
   description = "CIDR blocks for public subnets"
   type        = list(string)
-  default     = ["10.0.1.0/24", "10.0.2.0/24"]
+  default     = ["10.0.1.0/24","10.0.2.0/24"]
 }
 
 variable "private_subnet_cidrs" {
   description = "CIDR blocks for private subnets"
   type        = list(string)
-  default     = ["10.0.3.0/24", "10.0.4.0/24"]
+  default     = ["10.0.3.0/24","10.0.4.0/24"]
 }
 
 variable "availability_zones" {
   description = "Availability zones"
   type        = list(string)
-  default     = ["ap-south-1a", "ap-south-1b"]
+  default     = ["us-east-1a", "us-east-1b"]
 }
 
 variable "instance_type" {
   description = "EC2 instance type"
   type        = string
-  default     = "t3.micro"
+  default     = "t3a.micro"
 }
 
 variable "db_instance_class" {
   description = "RDS instance class"
   type        = string
-  default     = "db.t3.small"
+  default     = "db.t3.medium"
 }
 
 variable "db_username" {
@@ -68,7 +68,7 @@ variable "db_password" {
 variable "db_name" {
   description = "Database name"
   type        = string
-  default     = "jarwizdb"
+  default     = "jarwiz"
 }
 
 variable "tags" {
@@ -76,7 +76,7 @@ variable "tags" {
   type        = map(string)
   default = {
     Project     = "jarwiz"
-    Environment = "stage"
+    Environment = "medexpert"
     ManagedBy   = "terraform"
   }
 }
@@ -84,5 +84,11 @@ variable "tags" {
 variable "key_name" {
   description = "The key pair name to use for EC2 instances"
   type        = string
-  default     = "ubuntu-key" # Update with your actual key name
+  default     = "medexpert-aws" # Update with your actual key name
+}
+
+variable "glue_security_group_id" {
+  description = "AWS Glue security group ID for database access"
+  type        = string
+  default     = "sg-07a24b16118d7aad0"
 }

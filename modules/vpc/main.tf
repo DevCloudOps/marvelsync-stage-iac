@@ -101,12 +101,16 @@ resource "aws_security_group" "nat_instance" {
   tags = merge(var.tags, {
     Name = "${var.project_name}-${var.environment}-nat-sg"
   })
+
+  lifecycle {
+    ignore_changes = [ ingress ]
+  }
 }
 
 # EC2 NAT instance
 resource "aws_instance" "nat" {
   ami                    = data.aws_ami.amazon_linux.id
-  instance_type          = "t2.micro"
+  instance_type          = "t3a.micro"
   subnet_id              = aws_subnet.public[0].id
   vpc_security_group_ids = [aws_security_group.nat_instance.id]
   source_dest_check      = false
