@@ -137,19 +137,19 @@ module "ecs" {
   key_name                 = var.key_name
   # Task definitions resources - these should fit within a t3a.medium instance
   backend_task_cpu         = 1024  # 1 vCPU
-  backend_task_memory      = 2048  # 2 GB
+  backend_task_memory      = 1536  # 2 GB
   # Fixed counts for staging environment
   backend_service_desired_count = 1
   service_min_count        = 1
-  service_max_count        = 1  # Set max count equal to min for fixed-size environment
+  service_max_count        = 3  # Set max count equal to min for fixed-size environment
   backend_environment      = [
     {
       name  = "SPRING_PROFILES_ACTIVE"
-      value = "medexpert"
+      value = "${var.environment}"
     },
     {
       name  = "JAVA_OPTS"
-      value = "-Xms512m -Xmx768m -XX:+UseG1GC -XX:+UseContainerSupport"
+      value = "-Xms512m -Xmx512m -XX:+UseG1GC -XX:+UseContainerSupport"
     },
     {
       name  = "SPRING_JPA_HIBERNATE_DDL_AUTO"
@@ -162,25 +162,38 @@ module "ecs" {
   ]
   backend_secrets          = [
     # All environment variables from the single secret
+    # {
+    #   name      = "DB_PASSWORD"
+    #   valueFrom = "arn:aws:secretsmanager:ap-south-1:959959864795:secret:jarwiz/${var.environment}/ecs/qms-5IUpwF:DB_PASSWORD::"
+    # },
+    # {
+    #   name      = "AWS_ACCESS_KEY_ID"
+    #   valueFrom = "arn:aws:secretsmanager:ap-south-1:959959864795:secret:jarwiz/${var.environment}/ecs/qms-5IUpwF:AWS_ACCESS_KEY_ID::"
+    # },
+    # {
+    #   name      = "AWS_SECRET_ACCESS_KEY"
+    #   valueFrom = "arn:aws:secretsmanager:ap-south-1:959959864795:secret:jarwiz/${var.environment}/ecs/qms-5IUpwF:AWS_SECRET_ACCESS_KEY::"
+    # },
+    # {
+    #   name      = "FIREBASE_API_KEY"
+    #   valueFrom = "arn:aws:secretsmanager:ap-south-1:959959864795:secret:jarwiz/${var.environment}/ecs/qms-5IUpwF:FIREBASE_API_KEY::"
+    # }
+  ]
+  callsense_image = "${aws_ecr_repository.app.repository_url}:callsense-latest"
+  callsense_task_cpu = 1024
+  callsense_task_memory = 1536
+  callsense_service_desired_count = 1
+  callsense_environment = [
     {
-      name      = "DB_PASSWORD"
-      valueFrom = "arn:aws:secretsmanager:ap-south-1:959959864795:secret:jarwiz/medexpert/ecs/qms-5IUpwF:DB_PASSWORD::"
+      name  = "JAVA_OPTS"
+      value = "-Xms256m -Xmx512m -XX:+UseG1GC -XX:+UseContainerSupport"
     },
     {
-      name      = "AWS_ACCESS_KEY_ID"
-      valueFrom = "arn:aws:secretsmanager:ap-south-1:959959864795:secret:jarwiz/medexpert/ecs/qms-5IUpwF:AWS_ACCESS_KEY_ID::"
-    },
-    {
-      name      = "AWS_SECRET_ACCESS_KEY"
-      valueFrom = "arn:aws:secretsmanager:ap-south-1:959959864795:secret:jarwiz/medexpert/ecs/qms-5IUpwF:AWS_SECRET_ACCESS_KEY::"
-    },
-    {
-      name      = "FIREBASE_API_KEY"
-      valueFrom = "arn:aws:secretsmanager:ap-south-1:959959864795:secret:jarwiz/medexpert/ecs/qms-5IUpwF:FIREBASE_API_KEY::"
+      name  = "SERVER_PORT"
+      value = "8081"
     }
   ]
   tags                     = var.tags
 
   depends_on = [module.vpc]
 }
-
