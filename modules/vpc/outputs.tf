@@ -37,3 +37,8 @@ output "internet_gateway_id" {
   description = "The ID of the Internet Gateway"
   value       = aws_internet_gateway.main.id
 }
+
+output "nat_instance_security_group_id" {
+  description = "The ID of the NAT instance security group"
+  value       = aws_security_group.nat_instance.id
+}

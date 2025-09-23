@@ -3,7 +3,7 @@ output "instance_identifier" {
   value       = aws_db_instance.mysql.identifier
 }
 
-output "cluster_endpoint" {
+output "database_endpoint" {
   description = "The database endpoint"
   value       = aws_db_instance.mysql.endpoint
 }

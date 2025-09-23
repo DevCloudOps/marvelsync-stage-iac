@@ -150,3 +150,45 @@ variable "key_name" {
   description = "Name of the key pair to use for EC2 instances"
   type        = string
 }
+
+variable "callsense_image" {
+  description = "Docker image for callsense service"
+  type        = string
+  default     = ""
+}
+
+variable "callsense_task_cpu" {
+  description = "CPU units for callsense task"
+  type        = number
+  default     = 512
+}
+
+variable "callsense_task_memory" {
+  description = "Memory for callsense task in MiB"
+  type        = number
+  default     = 1024
+}
+
+variable "callsense_service_desired_count" {
+  description = "Desired count of callsense service tasks"
+  type        = number
+  default     = 1
+}
+
+variable "callsense_environment" {
+  description = "Environment variables for callsense container"
+  type        = list(object({
+    name  = string
+    value = string
+  }))
+  default     = []
+}
+
+variable "callsense_secrets" {
+  description = "Secrets for callsense container"
+  type        = list(object({
+    name      = string
+    valueFrom = string
+  }))
+  default     = []
+}

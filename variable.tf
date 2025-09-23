@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "project_name" {
   description = "Name of the project"
   type        = string
-  default     = "jarwiz"
+  default     = "jarvis"
 }
 
 variable "environment" {
@@ -43,7 +43,7 @@ variable "availability_zones" {
 variable "instance_type" {
   description = "EC2 instance type"
   type        = string
-  default     = "t3.micro"
+  default     = "t3a.micro"
 }
 
 variable "db_instance_class" {
@@ -68,14 +68,14 @@ variable "db_password" {
 variable "db_name" {
   description = "Database name"
   type        = string
-  default     = "jarwizdb"
+  default     = "jarwiz"
 }
 
 variable "tags" {
   description = "Common tags for all resources"
   type        = map(string)
   default = {
-    Project     = "jarwiz"
+    Project     = "jarvis"
     Environment = "stage"
     ManagedBy   = "terraform"
   }

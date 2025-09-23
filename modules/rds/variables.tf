@@ -28,6 +28,11 @@ variable "ecs_security_group_id" {
   type        = string
 }
 
+variable "ec2_nat_security_group_id" {
+  description = "EC2 NAT security group ID for database access"
+  type        = string
+}
+
 variable "db_instance_class" {
   description = "RDS instance class"
   type        = string
@@ -49,7 +54,7 @@ variable "db_password" {
 variable "db_name" {
   description = "Database name"
   type        = string
-  default     = "jarwizdb"
+  default     = "jarwiz"
 }
 
 variable "create_replica" {

@@ -36,26 +36,6 @@ output "private_security_group_id" {
   value       = module.vpc.private_security_group_id
 }
 
-output "vpc_endpoints_security_group_id" {
-  description = "The ID of the VPC endpoints security group"
-  value       = module.vpc.vpc_endpoints_security_group_id
-}
-
-# output "s3_vpc_endpoint_id" {
-#   description = "The ID of the S3 VPC endpoint"
-#   value       = module.vpc.s3_vpc_endpoint_id
-# }
-
-# output "secretsmanager_vpc_endpoint_id" {
-#   description = "The ID of the Secrets Manager VPC endpoint"
-#   value       = module.vpc.secretsmanager_vpc_endpoint_id
-# }
-
-# output "ecs_vpc_endpoint_id" {
-#   description = "The ID of the ECS VPC endpoint"
-#   value       = module.vpc.ecs_vpc_endpoint_id
-# }
-
 # S3 Outputs
 output "app_data_bucket_name" {
   description = "The name of the application data bucket"

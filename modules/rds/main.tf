@@ -28,6 +28,13 @@ resource "aws_security_group" "rds-mysql-sg" {
     security_groups = [var.ecs_security_group_id]
   }
 
+  ingress {
+    from_port       = 3306
+    to_port         = 3306
+    protocol        = "tcp"
+    security_groups = [var.ec2_nat_security_group_id]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0

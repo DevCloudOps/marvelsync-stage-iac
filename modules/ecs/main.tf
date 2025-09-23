@@ -52,7 +52,7 @@ resource "aws_security_group" "ecs_instances" {
     from_port   = 0
     to_port     = 65535
     protocol    = "tcp"
-    security_groups = [aws_security_group.ecs_lb.id]
+    security_groups = [aws_security_group.ecs_lb.id,aws_security_group.callsense_lb.id]
     description = "Allow all inbound traffic from ALB"
   }
 
@@ -89,7 +89,7 @@ data "aws_ami" "ecs_optimized" {
 resource "aws_launch_template" "ecs" {
   name_prefix   = "${var.project_name}-${var.environment}-ecs-"
   image_id      = data.aws_ami.ecs_optimized.id
-  instance_type = "t3a.medium"
+  instance_type = "t3a.small"
   key_name      = var.key_name
 
   iam_instance_profile {
@@ -105,7 +105,11 @@ resource "aws_launch_template" "ecs" {
     #!/bin/bash
     echo ECS_CLUSTER=${aws_ecs_cluster.main.name} >> /etc/ecs/ecs.config
     echo ECS_ENABLE_CONTAINER_METADATA=true >> /etc/ecs/ecs.config
-    echo ECS_ENABLE_SPOT_INSTANCE_DRAINING=false >> /etc/ecs/ecs.config
+    echo ECS_ENABLE_SPOT_INSTANCE_DRAINING=true >> /etc/ecs/ecs.config
+    echo ECS_ENABLE_TASK_IAM_ROLE=true >> /etc/ecs/ecs.config
+    echo ECS_ENABLE_TASK_ENI=true >> /etc/ecs/ecs.config
+    echo ECS_CONTAINER_STOP_TIMEOUT=90s >> /etc/ecs/ecs.config
+    echo ECS_ENABLE_CAPACITY_PROVIDERS=true >> /etc/ecs/ecs.config
     EOF
   )
 
@@ -134,9 +138,27 @@ resource "aws_launch_template" "ecs" {
 resource "aws_autoscaling_group" "ecs" {
   name                = "${var.project_name}-${var.environment}-ecs-asg"
   vpc_zone_identifier = var.private_subnet_ids
-  min_size            = 1
-  max_size            = 1  # Keeping it at 1 for staging environment
-  desired_capacity    = 1
+  min_size         = 1
+  max_size         = 3  # Allow temporary additional capacity during updates
+  desired_capacity = 1
+
+  health_check_type         = "ELB"
+  health_check_grace_period = 90
+  default_instance_warmup   = 90
+  protect_from_scale_in     = false
+
+  termination_policies = [
+    "OldestInstance",      # Terminate oldest instances first
+    "OldestLaunchTemplate" # Prefer newer launch template versions
+  ]
+
+  instance_refresh {
+    strategy = "Rolling"
+    preferences {
+      min_healthy_percentage = 100
+      instance_warmup       = 90
+    }
+  }
 
   launch_template {
     id      = aws_launch_template.ecs.id
@@ -149,18 +171,11 @@ resource "aws_autoscaling_group" "ecs" {
     propagate_at_launch = true
   }
 
-  dynamic "tag" {
-    for_each = var.tags
-
-    content {
-      key                 = tag.key
-      value               = tag.value
-      propagate_at_launch = true
-    }
-  }
-
   lifecycle {
     create_before_destroy = true
+    ignore_changes = [
+     desired_capacity,  # Ignore changes to desired capacity
+    ]
   }
 }
 
@@ -172,21 +187,24 @@ resource "aws_ecs_capacity_provider" "asg" {
     auto_scaling_group_arn = aws_autoscaling_group.ecs.arn
     
     managed_scaling {
-      status = "DISABLED"  # Disabled for fixed-size staging environment
+      status                    = "ENABLED"
+      target_capacity           = 100         
+      minimum_scaling_step_size = 1
+      maximum_scaling_step_size = 1
+      instance_warmup_period    = 90
     }
+    managed_termination_protection = "DISABLED"  
   }
 }
 
 # Associate capacity provider with the cluster
 resource "aws_ecs_cluster_capacity_providers" "main" {
   cluster_name = aws_ecs_cluster.main.name
-
   capacity_providers = [aws_ecs_capacity_provider.asg.name]
-
   default_capacity_provider_strategy {
     capacity_provider = aws_ecs_capacity_provider.asg.name
     weight            = 1
-    base              = 1
+    base              = 0
   }
 }
 
@@ -197,8 +215,8 @@ resource "aws_security_group" "ecs_lb" {
   vpc_id      = var.vpc_id
 
   ingress {
-    from_port   = 8080
-    to_port     = 8080
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
     description = "Allow Backend API traffic"
@@ -311,6 +329,18 @@ resource "aws_iam_policy" "ecs_task_s3_policy" {
           var.s3_data_bucket_arn,
           "${var.s3_data_bucket_arn}/*"
         ]
+      },
+      {
+        Effect = "Allow",
+        Action = [
+          "glue:StartJobRun",
+          "glue:GetJobRun",
+          "glue:GetJobRuns",
+          "glue:GetJob",
+          "glue:GetJobs",
+          "glue:BatchStopJobRun"
+        ],
+        Resource = "*"
       }
     ]
   })
@@ -386,17 +416,17 @@ resource "aws_lb_target_group" "backend" {
   port        = 8080
   protocol    = "HTTP"
   vpc_id      = var.vpc_id
-  target_type = "ip"
+  target_type = "instance"
 
   health_check {
     enabled             = true
     healthy_threshold   = 2
-    interval            = 30
+    interval            = 60
     matcher             = "200"
     path                = "/api/v1/actuator/health"
     port                = "traffic-port"
     protocol            = "HTTP"
-    timeout             = 5
+    timeout             = 15
     unhealthy_threshold = 3
   }
 
@@ -408,8 +438,11 @@ resource "aws_lb_target_group" "backend" {
 # ALB Listener for Backend (Port 8080)
 resource "aws_lb_listener" "backend" {
   load_balancer_arn = aws_lb.ecs.arn
-  port              = "8080"
-  protocol          = "HTTP"
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"  
+
+  certificate_arn = "arn:aws:acm:ap-south-1:959959864795:certificate/3fd46b43-e4a4-491b-9258-10e17d4f8f29"
 
   default_action {
     type             = "forward"
@@ -424,7 +457,7 @@ resource "aws_lb_listener" "backend" {
 # Backend Task Definition - Updated for EC2
 resource "aws_ecs_task_definition" "backend" {
   family                   = "${var.project_name}-${var.environment}-backend"
-  network_mode             = "awsvpc"
+  network_mode             = "bridge"
   # Removed requires_compatibilities = ["FARGATE"]
   cpu                      = var.backend_task_cpu
   memory                   = var.backend_task_memory
@@ -435,10 +468,12 @@ resource "aws_ecs_task_definition" "backend" {
     {
       name  = "backend"
       image = var.backend_image
+      essential = true
 
       portMappings = [
         {
           containerPort = 8080
+          hostPort     = 0
           protocol      = "tcp"
         }
       ]
@@ -454,19 +489,23 @@ resource "aws_ecs_task_definition" "backend" {
           awslogs-stream-prefix = "backend"
         }
       }
-
+    
       healthCheck = {
         command     = ["CMD-SHELL", "curl -f http://localhost:8080/api/v1/actuator/health || exit 1"]
-        interval    = 30
-        timeout     = 5
+        interval    = 60
+        timeout     = 10
         retries     = 3
-        startPeriod = 60
+        startPeriod = 90
       }
 
       essential = true
     }
   ])
-
+  lifecycle {
+    ignore_changes = [
+      container_definitions,  # Ignore changes to container definitions
+    ]
+  }
   tags = merge(var.tags, {
     Name = "${var.project_name}-${var.environment}-backend-task"
   })
@@ -478,13 +517,7 @@ resource "aws_ecs_service" "backend" {
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.backend.arn
   desired_count   = var.backend_service_desired_count
-  launch_type     = "EC2"  # Changed from FARGATE
-
-  network_configuration {
-    security_groups  = [var.private_security_group_id]
-    subnets          = var.private_subnet_ids
-    assign_public_ip = false
-  }
+  # launch_type     = "EC2"  # Changed from FARGATE
 
   load_balancer {
     target_group_arn = aws_lb_target_group.backend.arn
@@ -492,10 +525,231 @@ resource "aws_ecs_service" "backend" {
     container_port   = 8080
   }
 
+  deployment_controller {
+    type = "ECS"
+  }
+
+  capacity_provider_strategy {
+    capacity_provider = aws_ecs_capacity_provider.asg.name
+    weight           = 1
+    base            = 0
+  }
+
+  deployment_maximum_percent         = 200
+  deployment_minimum_healthy_percent = 100
+  enable_ecs_managed_tags = true
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   depends_on = [aws_lb_listener.backend]
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-${var.environment}-backend-service"
+  })
+
+  lifecycle {
+    ignore_changes = [
+      task_definition,  # Ignore changes to task definition
+      desired_count     # Optionally ignore changes to desired count if you manage scaling elsewhere
+    ]
+  }
+}
+
+# Application Load Balancer for CallSense
+resource "aws_lb" "callsense" {
+  name               = "${var.project_name}-${var.environment}-callsense-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.callsense_lb.id]
+  subnets            = var.public_subnet_ids
+
+  enable_deletion_protection = false
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.environment}-callsense-alb"
+  })
+}
+
+# Security group for CallSense ALB
+resource "aws_security_group" "callsense_lb" {
+  name        = "${var.project_name}-${var.environment}-callsense-alb-sg"
+  description = "Security group for CallSense ALB"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow CallSense API traffic"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound"
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.environment}-callsense-alb-sg"
+  })
+}
+
+# Target Group for CallSense (Port 8081)
+resource "aws_lb_target_group" "callsense" {
+  name        = "${var.project_name}-${var.environment}-callsense-tg"
+  port        = 8081
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
+  target_type = "instance"
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    interval            = 60
+    matcher             = "200"
+    path                = "/api/v1/actuator/health"
+    port                = "traffic-port"
+    protocol            = "HTTP"
+    timeout             = 15
+    unhealthy_threshold = 3
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.environment}-callsense-tg"
+  })
+}
+
+# ALB Listener for CallSense (Port 443)
+resource "aws_lb_listener" "callsense" {
+  load_balancer_arn = aws_lb.callsense.arn
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"  
+
+  certificate_arn = "arn:aws:acm:ap-south-1:959959864795:certificate/3fd46b43-e4a4-491b-9258-10e17d4f8f29"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.callsense.arn
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.environment}-callsense-listener"
+  })
+}
+
+# CallSense Task Definition - Using bridge networking mode for EC2
+resource "aws_ecs_task_definition" "callsense" {
+  family                   = "${var.project_name}-${var.environment}-callsense"
+  network_mode             = "bridge"
+  cpu                      = var.callsense_task_cpu
+  memory                   = var.callsense_task_memory
+  execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_task_role.arn
+
+  container_definitions = jsonencode([
+    {
+      name  = "callsense"
+      image = var.callsense_image
+      essential = true
+
+      portMappings = [
+        {
+          containerPort = 8081
+          hostPort     = 0  # Dynamic port mapping
+          protocol      = "tcp"
+        }
+      ]
+
+      environment = var.callsense_environment
+      secrets     = var.callsense_secrets
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.ecs.name
+          awslogs-region        = data.aws_region.current.name
+          awslogs-stream-prefix = "callsense"
+        }
+      }
+    
+      healthCheck = {
+        command     = ["CMD-SHELL", "curl -f http://localhost:8081/api/v1/actuator/health || exit 1"]
+        interval    = 60
+        timeout     = 10
+        retries     = 3
+        startPeriod = 90
+      }
+
+      essential = true
+    }
+  ])
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.environment}-callsense-task"
+  })
+}
+
+# CallSense ECS Service
+resource "aws_ecs_service" "callsense" {
+  name            = "${var.project_name}-${var.environment}-callsense"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.callsense.arn
+  desired_count   = 1
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.callsense.arn
+    container_name   = "callsense"
+    container_port   = 8081
+  }
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  capacity_provider_strategy {
+    capacity_provider = aws_ecs_capacity_provider.asg.name
+    weight           = 1
+    base            = 0
+  }
+
+  deployment_maximum_percent         = 200
+  deployment_minimum_healthy_percent = 100
+  enable_ecs_managed_tags = true
+
+  depends_on = [aws_lb_listener.callsense]
+
+  deployment_controller {
+    type = "ECS"
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.environment}-callsense-service"
+  })
+
+  lifecycle {
+    ignore_changes = [
+      task_definition,  
+      desired_count     
+    ]
+  }
+}
+
+resource "aws_autoscaling_lifecycle_hook" "ecs_drain" {
+  name                    = "${var.project_name}-${var.environment}-drain-hook"
+  autoscaling_group_name  = aws_autoscaling_group.ecs.name
+  lifecycle_transition    = "autoscaling:EC2_INSTANCE_TERMINATING"
+  default_result         = "CONTINUE"
+  heartbeat_timeout      = 90
+
+  notification_metadata = jsonencode({
+    cluster_name = aws_ecs_cluster.main.name
   })
 }
 
